@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Supply Chain Forecasting | Sugestão de Pedido</title>
+  <meta name="description" content="Sistema de previsão de demanda e sugestão de pedido — Rede Bandeirante. SARIMAX com promoção, estoque de segurança por quantil empírico e política de pedido." />
+
+  <!-- Favicon: logo do projeto -->
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="apple-touch-icon" href="assets/logo.png" />
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- Overlay de carregamento -->
+  <div class="loading-overlay" id="loading">
+    <div class="spinner"></div>
+    <span>Carregando dados do modelo&hellip;</span>
+  </div>
+
+  <div class="app-shell">
+
+    <!-- ══════════════ CABEÇALHO ══════════════ -->
+    <header class="topbar">
+      <div class="brand">
+        <img src="assets/logo.png" alt="Logo" class="brand-logo" />
+        <div class="brand-text">
+          <h1>Supply Chain Forecasting</h1>
+          <p class="brand-sub">Rede Bandeirante &middot; 144 lojas &middot; 1 centro de distribuição</p>
+        </div>
+      </div>
+      <div class="topbar-meta">
+        <span class="chip" id="chip-horizonte">H = 28 dias</span>
+        <span class="chip" id="chip-corte">Corte &mdash;</span>
+      </div>
+    </header>
+
+    <!-- ══════════════ BARRA DE CONTROLE ══════════════ -->
+    <section class="control-bar">
+      <label class="field">
+        <span class="field-label">Produto (SKU)</span>
+        <select id="select-produto" class="control"></select>
+      </label>
+      <label class="field">
+        <span class="field-label">Nível de serviço alvo</span>
+        <div class="slider-wrap">
+          <input type="range" id="slider-nivel" min="0.80" max="0.999" step="0.0025" value="0.9375" class="slider" />
+          <output id="out-nivel" class="slider-value">93,75%</output>
+        </div>
+      </label>
+      <div class="field field-info">
+        <span class="field-label">Origem do nível ótimo</span>
+        <div class="opt-info">
+          <span class="mono">Cu / (Cu + Co)</span>
+          <span class="hint">= 30% / (30% + 2%) = <strong>93,75%</strong></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════ KPIs ══════════════ -->
+    <section class="kpi-grid" id="kpi-grid">
+      <article class="kpi">
+        <span class="kpi-label">Previsão 28 dias</span>
+        <span class="kpi-value" id="kpi-previsto">&mdash;</span>
+        <span class="kpi-foot" id="kpi-previsto-foot">&mdash;</span>
+      </article>
+      <article class="kpi">
+        <span class="kpi-label">Realizado 28 dias</span>
+        <span class="kpi-value" id="kpi-real">&mdash;</span>
+        <span class="kpi-foot" id="kpi-real-foot">&mdash;</span>
+      </article>
+      <article class="kpi">
+        <span class="kpi-label">WMAPE do holdout</span>
+        <span class="kpi-value" id="kpi-wmape">&mdash;</span>
+        <span class="kpi-foot">Σ|prev &minus; real| / Σreal</span>
+      </article>
+      <article class="kpi">
+        <span class="kpi-label">Viés (MPE) do holdout</span>
+        <span class="kpi-value" id="kpi-vies">&mdash;</span>
+        <span class="kpi-foot">Σ(prev &minus; real) / Σreal</span>
+      </article>
+    </section>
+
+    <!-- ══════════════ GRÁFICO ══════════════ -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Histórico, previsão e realizado</h2>
+        <div class="legend">
+          <span class="legend-item"><i class="dot dot-hist"></i>Histórico (180d)</span>
+          <span class="legend-item"><i class="dot dot-real"></i>Realizado (holdout)</span>
+          <span class="legend-item"><i class="dot dot-prev"></i>Previsão SARIMAX</span>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="grafico"></canvas>
+      </div>
+    </section>
+
+    <!-- ══════════════ DECISÃO: CONTA ABERTA ══════════════ -->
+    <section class="decisao-grid">
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Conta aberta do pedido sugerido</h2>
+          <span class="chip chip-soft">Política: Pedido = Previsão + SS &minus; Estoque CD</span>
+        </div>
+        <ul class="conta" id="conta">
+          <li>
+            <span class="conta-rotulo">Demanda prevista (28 dias)</span>
+            <span class="conta-valor mono" id="conta-previsao">&mdash;</span>
+          </li>
+          <li>
+            <span class="conta-rotulo">(+) Estoque de segurança<span class="conta-sub" id="conta-ss-sub">quantil empírico dos 12 erros</span></span>
+            <span class="conta-valor mono" id="conta-ss">&mdash;</span>
+          </li>
+          <li>
+            <span class="conta-rotulo">(&minus;) Estoque disponível no CD
+              <span class="conta-sub">ajuste o campo: o pedido recalcula na hora</span>
+            </span>
+            <span class="conta-campo">
+              <input type="number" id="input-estoque-cd" class="control control-inline" value="3000" min="0" step="10"
+                     aria-label="Estoque disponível no CD, em unidades" />
+              <span class="conta-unidade">un</span>
+            </span>
+          </li>
+          <li class="conta-total">
+            <span class="conta-rotulo">(=) Pedido sugerido</span>
+            <span class="conta-valor mono" id="conta-pedido">&mdash;</span>
+          </li>
+        </ul>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Diagnóstico da decisão</h2>
+        </div>
+        <div class="diag" id="diag">
+          <div class="diag-row">
+            <span>Erro empírico do período &mdash; mediana</span>
+            <span class="mono" id="diag-mediana">&mdash;</span>
+          </div>
+          <div class="diag-row">
+            <span>Erro empírico do período &mdash; p90</span>
+            <span class="mono" id="diag-p90">&mdash;</span>
+          </div>
+          <div class="diag-row">
+            <span>Erro empírico do período &mdash; máximo</span>
+            <span class="mono" id="diag-max">&mdash;</span>
+          </div>
+          <div class="diag-row">
+            <span>Estoque de segurança / previsão</span>
+            <span class="mono" id="diag-ratio">&mdash;</span>
+          </div>
+          <div class="diag-row">
+            <span>Necessidade total (previsão + SS)</span>
+            <span class="mono" id="diag-necessidade">&mdash;</span>
+          </div>
+          <div class="diag-row">
+            <span>Cobertura do estoque no CD</span>
+            <span class="mono" id="diag-cobertura-cd">&mdash;</span>
+          </div>
+        </div>
+        <p class="diag-nota" id="diag-nota">&mdash;</p>
+      </article>
+    </section>
+
+    <!-- ══════════════ METODOLOGIA ══════════════ -->
+    <section class="panel metodo">
+      <div class="panel-head">
+        <h2>Como esta decisão é calculada</h2>
+      </div>
+      <div class="metodo-grid">
+        <div class="metodo-item">
+          <h3>1. Previsão</h3>
+          <p>SARIMAX <span class="mono">(2,1,2)(1,1,1,7)</span> ajustado sobre a venda diária da rede, com <span class="mono">pct_lojas_promo</span> como variável exógena conhecida no futuro (calendário promocional fechado com 6&ndash;8 semanas de antecedência). Previsões com <em>clip</em> em zero.</p>
+        </div>
+        <div class="metodo-item">
+          <h3>2. Estoque de segurança</h3>
+          <p>Quantil do <strong>nível de serviço alvo</strong> sobre a distribuição <strong>empírica</strong> dos erros de período (realizado &minus; previsto) medidos no backtest de origens móveis &mdash; 12 janelas de 28 dias, espaçadas 14 dias. Sem hipótese de normalidade.</p>
+        </div>
+        <div class="metodo-item">
+          <h3>3. Política de pedido</h3>
+          <p>Newsvendor: o nível de serviço ótimo é <span class="mono">Cu / (Cu + Co)</span>. Com custo de falta de 30% e custo de sobra de 2% do preço, o alvo é <strong>93,75%</strong>. O pedido cobre a previsão mais o estoque de segurança, descontando o que já existe no CD.</p>
+        </div>
+      </div>
+      <p class="metodo-rodape">
+        Aplicação estática: o modelo é treinado em Python e exportado para <span class="mono">docs/data/forecasts.js</span>.
+        Esta interface roda a <strong>camada de decisão</strong> inteiramente no navegador. Nenhum dado sai do seu dispositivo.
+      </p>
+    </section>
+
+    <footer class="rodape">
+      <span id="rodape-gerado">&mdash;</span>
+      <span class="rodape-sep">|</span>
+      <span>SEED = 42</span>
+      <span class="rodape-sep">|</span>
+      <span>CRISP-DM</span>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- Dados do modelo (gerado por scripts/fase6_export_app_data.py) -->
+  <script src="data/forecasts.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
